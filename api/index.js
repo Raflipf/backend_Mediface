@@ -3,22 +3,34 @@ const express = require("express");
 const mongoose = require("mongoose");
 
 const app = express();
-const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
 
-// MongoDB connection
-mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("MongoDB connected"))
-  .catch((err) => {
-    console.error("MongoDB connection error:", err);
-    process.exit(1);
-  });
+// MongoDB connection caching for serverless
+let cached = global.mongoose;
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
+}
+
+async function connectToDatabase() {
+  if (cached.conn) {
+    return cached.conn;
+  }
+  if (!cached.promise) {
+    cached.promise = mongoose
+      .connect(process.env.MONGODB_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+      })
+      .then((mongoose) => {
+        return mongoose;
+      });
+  }
+  cached.conn = await cached.promise;
+  return cached.conn;
+}
 
 // Basic route
 app.get("/", (req, res) => {
@@ -37,6 +49,7 @@ app.use("/api/doctors", doctorRoutes);
 app.use("/api/queues", queueRoutes);
 app.use("/api/users", userRoutes);
 
-app.listen(port, () => {
-  console.log(`Server berjalan di port ${port}`);
-});
+module.exports = async (req, res) => {
+  await connectToDatabase();
+  return app(req, res);
+};
